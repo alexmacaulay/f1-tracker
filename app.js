@@ -188,6 +188,11 @@ function F1CareerTracker() {
     return saved ? JSON.parse(saved) : { min: 8, max: 12 };
   });
 
+  const [lastAIChange, setLastAIChange] = useState(() => {
+    const saved = localStorage.getItem('f1-last-ai-change');
+    return saved ? JSON.parse(saved) : null;
+  });
+
   useEffect(() => {
     localStorage.setItem('f1-races', JSON.stringify(races));
   }, [races]);
@@ -206,9 +211,32 @@ function F1CareerTracker() {
     }
   }, [customTheme, selectedTeam]);
 
+  useEffect(() => {
+      if (lastAIChange) {
+        localStorage.setItem('f1-last-ai-change', JSON.stringify(lastAIChange));
+      }
+    }, [lastAIChange]);
+
   const addRace = () => {
     if (currentRace.track && currentRace.racePosition) {
-      setRaces([...races, { ...currentRace, id: Date.now() }]);
+      const newRaces = [...races, { ...currentRace, id: Date.now() }];
+      
+      // Check if AI level changed from previous race
+      if (races.length > 0) {
+        const previousAI = races[races.length - 1].aiLevel;
+        const currentAI = parseInt(currentRace.aiLevel);
+        
+        if (previousAI !== currentAI) {
+          // AI changed! Mark this race number
+          setLastAIChange({
+            raceNumber: newRaces.length,
+            fromAI: previousAI,
+            toAI: currentAI
+          });
+        }
+      }
+      
+      setRaces(newRaces);
       setCurrentRace({
         track: '',
         qualiPosition: '',
@@ -267,19 +295,76 @@ function F1CareerTracker() {
   };
 
   const getRecommendation = () => {
-    const stats = getStats();
-    if (!stats || races.length < 3) return null;
-
-    if (stats.avgPosition < targetRange.min - 2) {
-      return { type: 'increase', message: 'Consider increasing AI by 2-3 points', color: 'text-red-600' };
-    } else if (stats.avgPosition < targetRange.min) {
-      return { type: 'increase', message: 'Consider increasing AI by 1-2 points', color: 'text-orange-600' };
-    } else if (stats.avgPosition > targetRange.max + 2) {
-      return { type: 'decrease', message: 'Consider decreasing AI by 2-3 points', color: 'text-red-600' };
-    } else if (stats.avgPosition > targetRange.max) {
-      return { type: 'decrease', message: 'Consider decreasing AI by 1 point', color: 'text-orange-600' };
+    // Need at least 3 races to give any feedback
+    if (races.length < 3) return null;
+  
+    // Calculate races since last AI change
+    const racesSinceChange = lastAIChange 
+      ? races.length - lastAIChange.raceNumber 
+      : races.length;
+  
+    // If recently changed AI, we're in settling period
+    const isSettling = racesSinceChange < 5;
+  
+    // Use last 5 races for evaluation (or all races if less than 5)
+    const recentRaces = races.slice(-5);
+    const recentPositions = recentRaces.map(r => parseInt(r.racePosition)).filter(p => !isNaN(p));
+    const recentAvg = recentPositions.reduce((a, b) => a + b, 0) / recentPositions.length;
+  
+    // During settling period, just show status
+    if (isSettling && lastAIChange) {
+      const remaining = 5 - racesSinceChange;
+      return {
+        type: 'settling',
+        message: `Calibrating AI ${lastAIChange.toAI}: ${racesSinceChange}/5 races complete. ${remaining} more race${remaining !== 1 ? 's' : ''} before next recommendation.`,
+        color: 'text-blue-600',
+        racesAnalyzed: racesSinceChange,
+        recentAvg: recentAvg,
+        isSettling: true
+      };
+    }
+  
+    // After settling period (or initial calibration), give recommendations
+    if (recentAvg < targetRange.min - 2) {
+      return { 
+        type: 'increase', 
+        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider increasing AI by 2-3 points`, 
+        color: 'text-red-600',
+        racesAnalyzed: recentRaces.length,
+        recentAvg: recentAvg
+      };
+    } else if (recentAvg < targetRange.min) {
+      return { 
+        type: 'increase', 
+        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider increasing AI by 1-2 points`, 
+        color: 'text-orange-600',
+        racesAnalyzed: recentRaces.length,
+        recentAvg: recentAvg
+      };
+    } else if (recentAvg > targetRange.max + 2) {
+      return { 
+        type: 'decrease', 
+        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider decreasing AI by 2-3 points`, 
+        color: 'text-red-600',
+        racesAnalyzed: recentRaces.length,
+        recentAvg: recentAvg
+      };
+    } else if (recentAvg > targetRange.max) {
+      return { 
+        type: 'decrease', 
+        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider decreasing AI by 1 point`, 
+        color: 'text-orange-600',
+        racesAnalyzed: recentRaces.length,
+        recentAvg: recentAvg
+      };
     } else {
-      return { type: 'perfect', message: `AI level looks good! ${theme.mascotName} approves! ✨${theme.mascot}`, color: 'text-green-600' };
+      return { 
+        type: 'perfect', 
+        message: `Recent avg: P${recentAvg.toFixed(1)} - AI level looks good! ${theme.mascotName} approves! ✨${theme.mascot}`, 
+        color: 'text-green-600',
+        racesAnalyzed: recentRaces.length,
+        recentAvg: recentAvg
+      };
     }
   };
 
@@ -530,19 +615,28 @@ function F1CareerTracker() {
 
           {recommendation && races.length >= 3 && (
             <div className={`p-4 rounded-lg mb-6 border-2 ${
-              recommendation.type === 'perfect' ? 'bg-green-50 border-green-300' : 'bg-orange-50 border-orange-300'
+              recommendation.type === 'perfect' ? 'bg-green-50 border-green-300' : 
+              recommendation.type === 'settling' ? 'bg-blue-50 border-blue-300' :
+              'bg-orange-50 border-orange-300'
             }`}>
               <div className="flex items-center gap-2">
                 {recommendation.type === 'increase' && <TrendingUpIcon />}
                 {recommendation.type === 'decrease' && <TrendingDownIcon />}
                 {recommendation.type === 'perfect' && <span className="text-2xl">{theme.mascot}</span>}
+                {recommendation.type === 'settling' && <span className="text-2xl">⏳</span>}
                 <span className={`font-semibold ${recommendation.color}`}>
                   {recommendation.message}
                 </span>
               </div>
-              {races.length < 5 && (
+              {!recommendation.isSettling && (
                 <div className="text-sm text-gray-600 mt-2">
-                  Note: Run {5 - races.length} more race{5 - races.length !== 1 ? 's' : ''} for more reliable calibration
+                  {races.length < 5 ? (
+                    <span>Initial calibration: analyzing {races.length} race{races.length !== 1 ? 's' : ''}</span>
+                  ) : lastAIChange ? (
+                    <span>Evaluated last {recommendation.racesAnalyzed} races at AI {races[races.length - 1].aiLevel}</span>
+                  ) : (
+                    <span>Analyzing your last {recommendation.racesAnalyzed} races</span>
+                  )}
                 </div>
               )}
             </div>
@@ -837,3 +931,4 @@ function F1CareerTracker() {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<F1CareerTracker />);
+
