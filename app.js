@@ -298,25 +298,31 @@ function F1CareerTracker() {
     // Need at least 3 races to give any feedback
     if (races.length < 3) return null;
   
-    // Calculate races since last AI change
+    // Calculate races since last AI change (INCLUDING the change race)
     const racesSinceChange = lastAIChange 
-      ? races.length - lastAIChange.raceNumber 
+      ? races.length - lastAIChange.raceNumber + 1  // +1 to include the change race
       : races.length;
   
-    // If recently changed AI, we're in settling period
-    const isSettling = racesSinceChange < 5;
+    // If recently changed AI, we're in settling period (3 for initial, 5 for solid)
+    const hasInitialData = racesSinceChange >= 3;
+    const hasFullData = racesSinceChange >= 5;
   
-    // Use last 5 races for evaluation (or all races if less than 5)
-    const recentRaces = races.slice(-5);
-    const recentPositions = recentRaces.map(r => parseInt(r.racePosition)).filter(p => !isNaN(p));
-    const recentAvg = recentPositions.reduce((a, b) => a + b, 0) / recentPositions.length;
+    // Get races at current AI level
+    const racesAtCurrentAI = lastAIChange 
+      ? races.slice(lastAIChange.raceNumber - 1)  // Include the change race
+      : races;
+      
+    const recentPositions = racesAtCurrentAI.map(r => parseInt(r.racePosition)).filter(p => !isNaN(p));
+    const recentAvg = recentPositions.length > 0 
+      ? recentPositions.reduce((a, b) => a + b, 0) / recentPositions.length 
+      : 0;
   
-    // During settling period, just show status
-    if (isSettling && lastAIChange) {
-      const remaining = 5 - racesSinceChange;
+    // During settling period before initial data
+    if (!hasInitialData && lastAIChange) {
+      const remaining = 3 - racesSinceChange;
       return {
         type: 'settling',
-        message: `Calibrating AI ${lastAIChange.toAI}: ${racesSinceChange}/5 races complete. ${remaining} more race${remaining !== 1 ? 's' : ''} before next recommendation.`,
+        message: `Calibrating AI ${lastAIChange.toAI}: ${racesSinceChange}/3 races complete. ${remaining} more race${remaining !== 1 ? 's' : ''} for initial recommendation.`,
         color: 'text-blue-600',
         racesAnalyzed: racesSinceChange,
         recentAvg: recentAvg,
@@ -324,47 +330,59 @@ function F1CareerTracker() {
       };
     }
   
-    // After settling period (or initial calibration), give recommendations
-    if (recentAvg < targetRange.min - 2) {
-      return { 
-        type: 'increase', 
-        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider increasing AI by 2-3 points`, 
-        color: 'text-red-600',
-        racesAnalyzed: recentRaces.length,
+    // Have initial data but not full data yet
+    if (hasInitialData && !hasFullData && lastAIChange) {
+      const remaining = 5 - racesSinceChange;
+      const recommendation = getAIRecommendation(recentAvg);
+      return {
+        ...recommendation,
+        message: `${recommendation.message} (${racesSinceChange}/5 races - ${remaining} more for better accuracy)`,
+        racesAnalyzed: racesSinceChange,
         recentAvg: recentAvg
       };
-    } else if (recentAvg < targetRange.min) {
-      return { 
-        type: 'increase', 
-        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider increasing AI by 1-2 points`, 
-        color: 'text-orange-600',
-        racesAnalyzed: recentRaces.length,
-        recentAvg: recentAvg
-      };
-    } else if (recentAvg > targetRange.max + 2) {
-      return { 
-        type: 'decrease', 
-        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider decreasing AI by 2-3 points`, 
-        color: 'text-red-600',
-        racesAnalyzed: recentRaces.length,
-        recentAvg: recentAvg
-      };
-    } else if (recentAvg > targetRange.max) {
-      return { 
-        type: 'decrease', 
-        message: `Recent avg: P${recentAvg.toFixed(1)} - Consider decreasing AI by 1 point`, 
-        color: 'text-orange-600',
-        racesAnalyzed: recentRaces.length,
-        recentAvg: recentAvg
-      };
-    } else {
-      return { 
-        type: 'perfect', 
-        message: `Recent avg: P${recentAvg.toFixed(1)} - AI level looks good! ${theme.mascotName} approves! ✨${theme.mascot}`, 
-        color: 'text-green-600',
-        racesAnalyzed: recentRaces.length,
-        recentAvg: recentAvg
-      };
+    }
+  
+    // Full data available, give solid recommendation
+    const recommendation = getAIRecommendation(recentAvg);
+    return {
+      ...recommendation,
+      racesAnalyzed: racesAtCurrentAI.length,
+      recentAvg: recentAvg
+    };
+  
+    // Helper function to determine recommendation based on average
+    function getAIRecommendation(avg) {
+      if (avg < targetRange.min - 2) {
+        return { 
+          type: 'increase', 
+          message: `Recent avg: P${avg.toFixed(1)} - Consider increasing AI by 2-3 points`, 
+          color: 'text-red-600'
+        };
+      } else if (avg < targetRange.min) {
+        return { 
+          type: 'increase', 
+          message: `Recent avg: P${avg.toFixed(1)} - Consider increasing AI by 1-2 points`, 
+          color: 'text-orange-600'
+        };
+      } else if (avg > targetRange.max + 2) {
+        return { 
+          type: 'decrease', 
+          message: `Recent avg: P${avg.toFixed(1)} - Consider decreasing AI by 2-3 points`, 
+          color: 'text-red-600'
+        };
+      } else if (avg > targetRange.max) {
+        return { 
+          type: 'decrease', 
+          message: `Recent avg: P${avg.toFixed(1)} - Consider decreasing AI by 1 point`, 
+          color: 'text-orange-600'
+        };
+      } else {
+        return { 
+          type: 'perfect', 
+          message: `Recent avg: P${avg.toFixed(1)} - AI level looks good! ${theme.mascotName} approves! ✨${theme.mascot}`, 
+          color: 'text-green-600'
+        };
+      }
     }
   };
 
@@ -613,31 +631,64 @@ function F1CareerTracker() {
             </div>
           )}
 
-          {recommendation && races.length >= 3 && (
+          {(recommendation || races.length > 0) && (
             <div className={`p-4 rounded-lg mb-6 border-2 ${
+              races.length < 3 ? 'bg-gray-50 border-gray-300' :
               recommendation.type === 'perfect' ? 'bg-green-50 border-green-300' : 
               recommendation.type === 'settling' ? 'bg-blue-50 border-blue-300' :
               'bg-orange-50 border-orange-300'
             }`}>
-              <div className="flex items-center gap-2">
-                {recommendation.type === 'increase' && <TrendingUpIcon />}
-                {recommendation.type === 'decrease' && <TrendingDownIcon />}
-                {recommendation.type === 'perfect' && <span className="text-2xl">{theme.mascot}</span>}
-                {recommendation.type === 'settling' && <span className="text-2xl">⏳</span>}
-                <span className={`font-semibold ${recommendation.color}`}>
-                  {recommendation.message}
-                </span>
-              </div>
-              {!recommendation.isSettling && (
-                <div className="text-sm text-gray-600 mt-2">
-                  {races.length < 5 ? (
-                    <span>Initial calibration: analyzing {races.length} race{races.length !== 1 ? 's' : ''}</span>
-                  ) : lastAIChange ? (
-                    <span>Evaluated last {recommendation.racesAnalyzed} races at AI {races[races.length - 1].aiLevel}</span>
-                  ) : (
-                    <span>Analyzing your last {recommendation.racesAnalyzed} races</span>
-                  )}
+              {races.length === 1 && (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📊</span>
+                    <span className="font-semibold text-gray-700">
+                      First race recorded! Add 2 more races (3 total) for initial AI recommendation.
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-600 mt-2">
+                    For more reliable calibration, aim for 5 races at the same AI level.
+                  </div>
                 </div>
+              )}
+              
+              {races.length === 2 && (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">📊</span>
+                    <span className="font-semibold text-gray-700">
+                      Two races down! Add 1 more race (3 total) for initial AI recommendation.
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-600 mt-2">
+                    For more reliable calibration, aim for 5 races at the same AI level.
+                  </div>
+                </div>
+              )}
+          
+              {races.length >= 3 && recommendation && (
+                <>
+                  <div className="flex items-center gap-2">
+                    {recommendation.type === 'increase' && <TrendingUpIcon />}
+                    {recommendation.type === 'decrease' && <TrendingDownIcon />}
+                    {recommendation.type === 'perfect' && <span className="text-2xl">{theme.mascot}</span>}
+                    {recommendation.type === 'settling' && <span className="text-2xl">⏳</span>}
+                    <span className={`font-semibold ${recommendation.color}`}>
+                      {recommendation.message}
+                    </span>
+                  </div>
+                  {!recommendation.isSettling && (
+                    <div className="text-sm text-gray-600 mt-2">
+                      {races.length < 5 ? (
+                        <span>Initial calibration: analyzing {races.length} race{races.length !== 1 ? 's' : ''}. Run {5 - races.length} more for better accuracy.</span>
+                      ) : lastAIChange ? (
+                        <span>Evaluated last {recommendation.racesAnalyzed} races at AI {races[races.length - 1].aiLevel}</span>
+                      ) : (
+                        <span>Analyzing your last {recommendation.racesAnalyzed} races</span>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -743,7 +794,7 @@ function F1CareerTracker() {
           </button>
         </div>
 
-        {races.length > 0 && (
+        
           <div className="bg-white rounded-lg shadow-2xl p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold" style={{ color: theme.secondary }}>Race History</h2>
@@ -774,100 +825,139 @@ function F1CareerTracker() {
                 </button>
               </div>
             </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b-2" style={{ borderColor: theme.secondary }}>
-                    <th className="text-left py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Track</th>
-                    <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Quali</th>
-                    <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Race</th>
-                    <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>AI</th>
-                    <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>TM Quali</th>
-                    <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>TM Race</th>
-                    <th className="text-left py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Notes</th>
-                    <th className="py-2 px-3"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {races.map((race) => {
-                    const racePos = parseInt(race.racePosition);
-                    const inTarget = racePos >= targetRange.min && racePos <= targetRange.max;
-                    const isPodium = racePos <= 3;
-                    const isEditing = editingRace && editingRace.id === race.id;
-                    
-                    if (isEditing) {
+
+            {races.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b-2" style={{ borderColor: theme.secondary }}>
+                      <th className="text-left py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Track</th>
+                      <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Quali</th>
+                      <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Race</th>
+                      <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>AI</th>
+                      <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>TM Quali</th>
+                      <th className="text-center py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>TM Race</th>
+                      <th className="text-left py-2 px-3 text-sm font-semibold" style={{ color: theme.secondary }}>Notes</th>
+                      <th className="py-2 px-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {races.map((race) => {
+                      const racePos = parseInt(race.racePosition);
+                      const inTarget = racePos >= targetRange.min && racePos <= targetRange.max;
+                      const isPodium = racePos <= 3;
+                      const isEditing = editingRace && editingRace.id === race.id;
+                      
+                      if (isEditing) {
+                        return (
+                          <tr key={race.id} className="border-b border-gray-100 bg-blue-50">
+                            <td className="py-3 px-3">
+                              <input
+                                type="text"
+                                value={editingRace.track}
+                                onChange={(e) => setEditingRace({ ...editingRace, track: e.target.value })}
+                                className="w-full px-2 py-1 border rounded"
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <input
+                                type="number"
+                                value={editingRace.qualiPosition}
+                                onChange={(e) => setEditingRace({ ...editingRace, qualiPosition: e.target.value })}
+                                className="w-full px-2 py-1 border rounded text-center"
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <input
+                                type="number"
+                                value={editingRace.racePosition}
+                                onChange={(e) => setEditingRace({ ...editingRace, racePosition: e.target.value })}
+                                className="w-full px-2 py-1 border rounded text-center"
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <input
+                                type="number"
+                                value={editingRace.aiLevel}
+                                onChange={(e) => setEditingRace({ ...editingRace, aiLevel: e.target.value })}
+                                className="w-full px-2 py-1 border rounded text-center"
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <input
+                                type="number"
+                                value={editingRace.teammateQuali}
+                                onChange={(e) => setEditingRace({ ...editingRace, teammateQuali: e.target.value })}
+                                className="w-full px-2 py-1 border rounded text-center"
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <input
+                                type="number"
+                                value={editingRace.teammateRace}
+                                onChange={(e) => setEditingRace({ ...editingRace, teammateRace: e.target.value })}
+                                className="w-full px-2 py-1 border rounded text-center"
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <input
+                                type="text"
+                                value={editingRace.notes}
+                                onChange={(e) => setEditingRace({ ...editingRace, notes: e.target.value })}
+                                className="w-full px-2 py-1 border rounded"
+                              />
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="flex gap-1">
+                                <button
+                                  onClick={saveEditRace}
+                                  className="text-green-600 hover:text-green-800 p-1"
+                                  title="Save"
+                                >
+                                  <SaveIcon />
+                                </button>
+                                <button
+                                  onClick={cancelEditRace}
+                                  className="text-red-600 hover:text-red-800 font-bold p-1"
+                                  title="Cancel"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      
                       return (
-                        <tr key={race.id} className="border-b border-gray-100 bg-blue-50">
-                          <td className="py-3 px-3">
-                            <input
-                              type="text"
-                              value={editingRace.track}
-                              onChange={(e) => setEditingRace({ ...editingRace, track: e.target.value })}
-                              className="w-full px-2 py-1 border rounded"
-                            />
+                        <tr key={race.id} className="border-b border-gray-100 hover:bg-blue-50">
+                          <td className="py-3 px-3 font-medium">{race.track}</td>
+                          <td className="text-center py-3 px-3">P{race.qualiPosition || '-'}</td>
+                          <td className={`text-center py-3 px-3 font-bold ${
+                            isPodium ? 'text-yellow-600' :
+                            inTarget ? 'text-green-600' : 
+                            racePos < targetRange.min ? 'text-red-600' : 'text-orange-600'
+                          }`}>
+                            {isPodium && '🏆 '}P{race.racePosition}
                           </td>
-                          <td className="py-3 px-3">
-                            <input
-                              type="number"
-                              value={editingRace.qualiPosition}
-                              onChange={(e) => setEditingRace({ ...editingRace, qualiPosition: e.target.value })}
-                              className="w-full px-2 py-1 border rounded text-center"
-                            />
-                          </td>
-                          <td className="py-3 px-3">
-                            <input
-                              type="number"
-                              value={editingRace.racePosition}
-                              onChange={(e) => setEditingRace({ ...editingRace, racePosition: e.target.value })}
-                              className="w-full px-2 py-1 border rounded text-center"
-                            />
-                          </td>
-                          <td className="py-3 px-3">
-                            <input
-                              type="number"
-                              value={editingRace.aiLevel}
-                              onChange={(e) => setEditingRace({ ...editingRace, aiLevel: e.target.value })}
-                              className="w-full px-2 py-1 border rounded text-center"
-                            />
-                          </td>
-                          <td className="py-3 px-3">
-                            <input
-                              type="number"
-                              value={editingRace.teammateQuali}
-                              onChange={(e) => setEditingRace({ ...editingRace, teammateQuali: e.target.value })}
-                              className="w-full px-2 py-1 border rounded text-center"
-                            />
-                          </td>
-                          <td className="py-3 px-3">
-                            <input
-                              type="number"
-                              value={editingRace.teammateRace}
-                              onChange={(e) => setEditingRace({ ...editingRace, teammateRace: e.target.value })}
-                              className="w-full px-2 py-1 border rounded text-center"
-                            />
-                          </td>
-                          <td className="py-3 px-3">
-                            <input
-                              type="text"
-                              value={editingRace.notes}
-                              onChange={(e) => setEditingRace({ ...editingRace, notes: e.target.value })}
-                              className="w-full px-2 py-1 border rounded"
-                            />
-                          </td>
+                          <td className="text-center py-3 px-3 text-gray-600">{race.aiLevel}</td>
+                          <td className="text-center py-3 px-3 text-gray-500">P{race.teammateQuali || '-'}</td>
+                          <td className="text-center py-3 px-3 text-gray-500">P{race.teammateRace || '-'}</td>
+                          <td className="py-3 px-3 text-sm text-gray-600">{race.notes}</td>
                           <td className="py-3 px-3">
                             <div className="flex gap-1">
                               <button
-                                onClick={saveEditRace}
-                                className="text-green-600 hover:text-green-800 p-1"
-                                title="Save"
+                                onClick={() => startEditRace(race)}
+                                className="hover:bg-gray-200 p-1 rounded"
+                                style={{ color: theme.primary }}
+                                title="Edit"
                               >
-                                <SaveIcon />
+                                <EditIcon />
                               </button>
                               <button
-                                onClick={cancelEditRace}
+                                onClick={() => deleteRace(race.id)}
                                 className="text-red-600 hover:text-red-800 font-bold p-1"
-                                title="Cancel"
+                                title="Delete"
                               >
                                 ✕
                               </button>
@@ -875,50 +965,12 @@ function F1CareerTracker() {
                           </td>
                         </tr>
                       );
-                    }
-                    
-                    return (
-                      <tr key={race.id} className="border-b border-gray-100 hover:bg-blue-50">
-                        <td className="py-3 px-3 font-medium">{race.track}</td>
-                        <td className="text-center py-3 px-3">P{race.qualiPosition || '-'}</td>
-                        <td className={`text-center py-3 px-3 font-bold ${
-                          isPodium ? 'text-yellow-600' :
-                          inTarget ? 'text-green-600' : 
-                          racePos < targetRange.min ? 'text-red-600' : 'text-orange-600'
-                        }`}>
-                          {isPodium && '🏆 '}P{race.racePosition}
-                        </td>
-                        <td className="text-center py-3 px-3 text-gray-600">{race.aiLevel}</td>
-                        <td className="text-center py-3 px-3 text-gray-500">P{race.teammateQuali || '-'}</td>
-                        <td className="text-center py-3 px-3 text-gray-500">P{race.teammateRace || '-'}</td>
-                        <td className="py-3 px-3 text-sm text-gray-600">{race.notes}</td>
-                        <td className="py-3 px-3">
-                          <div className="flex gap-1">
-                            <button
-                              onClick={() => startEditRace(race)}
-                              className="hover:bg-gray-200 p-1 rounded"
-                              style={{ color: theme.primary }}
-                              title="Edit"
-                            >
-                              <EditIcon />
-                            </button>
-                            <button
-                              onClick={() => deleteRace(race.id)}
-                              className="text-red-600 hover:text-red-800 font-bold p-1"
-                              title="Delete"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        )}
 
         <div className="mt-6 text-center text-white text-sm opacity-75">
           <p>{theme.mascot} Powered by {theme.mascotName} - {theme.name} {theme.mascot}</p>
@@ -931,4 +983,5 @@ function F1CareerTracker() {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<F1CareerTracker />);
+
 
