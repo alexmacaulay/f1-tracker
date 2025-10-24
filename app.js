@@ -223,7 +223,7 @@ function F1CareerTracker() {
       
       // Check if AI level changed from previous race
       if (races.length > 0) {
-        const previousAI = races[races.length - 1].aiLevel;
+        const previousAI = parseInt(races[races.length - 1].aiLevel);
         const currentAI = parseInt(currentRace.aiLevel);
         
         if (previousAI !== currentAI) {
@@ -234,6 +234,9 @@ function F1CareerTracker() {
             toAI: currentAI
           });
         }
+      } else {
+        // First race ever - no AI change to track
+        setLastAIChange(null);
       }
       
       setRaces(newRaces);
@@ -445,7 +448,9 @@ function F1CareerTracker() {
   const clearAllData = () => {
     if (confirm('Are you sure you want to clear all race data? This cannot be undone!')) {
       setRaces([]);
+      setLastAIChange(null);
       localStorage.removeItem('f1-races');
+      localStorage.removeItem('f1-last-ai-change');
     }
   };
 
@@ -983,5 +988,6 @@ function F1CareerTracker() {
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<F1CareerTracker />);
+
 
 
